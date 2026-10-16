@@ -39,6 +39,18 @@ function loadOrCreateToken() {
 }
 const TOKEN = loadOrCreateToken();
 
+// observability: every tool call is logged to stdout (journald) with its
+// duration, so `journalctl --user -u gptbridge -f` shows what ChatGPT is
+// doing on this machine and whether slowness is local or upstream.
+const log = (...parts) => console.log(new Date().toISOString(), ...parts);
+let inflight = 0;
+const oneLine = (s) => String(s).replace(/\s+/g, " ").slice(0, 120);
+const describeArgs = (a = {}) => {
+  if (a.command !== undefined) return `cmd="${oneLine(a.command)}"${a.cwd ? ` cwd=${a.cwd}` : ""}`;
+  if (a.path !== undefined) return `path=${a.path}`;
+  return oneLine(JSON.stringify(a));
+};
+
 const resolveInCwd = (p) =>
   path.isAbsolute(p) ? p : path.resolve(process.env.LOCALMCP_CWD || CWD, p);
 
@@ -134,7 +146,7 @@ async function handle(body) {
           protocolVersion:
             typeof body?.params?.protocolVersion === "string" ? body.params.protocolVersion : "2025-03-26",
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "gptbridge", version: "1.0.0" },
+          serverInfo: { name: "gptbridge", version: "1.1.0" },
         },
       };
     case "notifications/initialized":
@@ -177,6 +189,7 @@ const server = http.createServer((req, res) => {
   req.on("end", async () => {
     const url = (req.url ?? "").split("?")[0];
     if (!authorized(req, url)) {
+      log(`401 unauthorized ${url}`);
       res.writeHead(401, { "content-type": "application/json" });
       res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "unauthorized" } }));
       return;
@@ -190,7 +203,20 @@ const server = http.createServer((req, res) => {
       return;
     }
     try {
+      const started = Date.now();
+      const method = String(body?.method ?? "");
+      inflight += 1;
       const out = await handle(body);
+      inflight -= 1;
+      const ms = Date.now() - started;
+      if (method === "tools/call") {
+        log(
+          `tool ${String(body?.params?.name ?? "")} ${describeArgs(body?.params?.arguments)}` +
+            ` -> ${out?.result?.isError ? "ERROR" : "ok"} in ${ms}ms (inflight ${inflight})`
+        );
+      } else if (method && method !== "ping") {
+        log(`${method} -> ok in ${ms}ms`);
+      }
       if (out === null) {
         res.writeHead(202);
         res.end();

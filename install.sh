@@ -63,10 +63,33 @@ fi
 
 mkdir -p "$BIN_DIR" "$SVC_DIR" "$SVC_DIR/default.target.wants" "$GB_DIR"
 
-# server launcher (absolute node path: systemd has no nvm PATH)
+# server launcher (absolute node path: systemd has no nvm PATH) + CLI
 cat > "$BIN_DIR/gptbridge" <<L
 #!/usr/bin/env bash
-exec "$NODE_BIN" "$DIR/server.mjs"
+# gptbridge CLI: no args = run server | log = live tool calls | status | tunnel
+case "\${1:-}" in
+  "") exec "$NODE_BIN" "$DIR/server.mjs" ;;
+  log) exec journalctl --user -u gptbridge.service -f -o cat ;;
+  tunnel) exec journalctl --user -u gptbridge-tunnel.service -f -o cat ;;
+  status)
+    echo "service : \$(systemctl --user is-active gptbridge.service 2>/dev/null || echo unknown)"
+    port="\$(grep -oE '^LOCALMCP_PORT=[0-9]+' "\$HOME/.gptbridge/env" 2>/dev/null | cut -d= -f2)"
+    port="\${port:-8790}"
+    if command -v curl >/dev/null 2>&1; then
+      code="\$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:\${port}/mcp/\$(cat "\$HOME/.gptbridge/token")" -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' 2>/dev/null || true)"
+      echo "endpoint: http://127.0.0.1:\${port}/mcp (ping \${code:-000})"
+      t="\$(systemctl --user is-active gptbridge-tunnel.service 2>/dev/null || echo inactive)"
+      if [ "\$t" = "active" ]; then
+        echo "tunnel  : active (ui: http://127.0.0.1:18790)"
+      else
+        echo "tunnel  : \$t"
+      fi
+    fi
+    echo "recent:"
+    journalctl --user -u gptbridge.service -n 30 --no-pager -o cat 2>/dev/null | grep -E 'tool |401 ' | tail -8 || true
+    ;;
+  *) echo "usage: gptbridge [log|status|tunnel]  (no args = run the server)"; exit 1 ;;
+esac
 L
 chmod 755 "$BIN_DIR/gptbridge"
 

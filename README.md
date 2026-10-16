@@ -84,6 +84,21 @@ run gh pr list in ~/projects/gptbridge and summarize the open PRs
 `run_command` accepts an optional `cwd` (defaults to your home). Output is
 capped at ~20k chars per call, file reads at ~50k.
 
+## Watch it work
+
+Every tool call is logged with its duration, so when a call feels slow you
+can see whether the time went to the command itself or to the round trip
+(model + tunnel):
+
+```bash
+gptbridge log      # live: every tool call ChatGPT makes, with durations
+gptbridge status   # service state, endpoint ping, last tool calls
+gptbridge tunnel   # live tunnel-client log
+```
+
+The Secure MCP Tunnel also serves a local UI with connection health:
+[http://127.0.0.1:18790](http://127.0.0.1:18790) (`/ui`, `/healthz`, `/metrics`).
+
 ## Tools
 
 | Tool | What it does |
