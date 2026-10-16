@@ -27,7 +27,7 @@ const TIMEOUT = Number(process.env.LOCALMCP_TIMEOUT || 120_000);
 const TOKEN_DIR = path.join(os.homedir(), ".gptbridge");
 const TOKEN_FILE = path.join(TOKEN_DIR, "token");
 
-function loadOrCreateToken(): string {
+function loadOrCreateToken() {
   try {
     const saved = fs.readFileSync(TOKEN_FILE, "utf8").trim();
     if (saved) return saved;
@@ -39,10 +39,10 @@ function loadOrCreateToken(): string {
 }
 const TOKEN = loadOrCreateToken();
 
-const resolveInCwd = (p: string) =>
+const resolveInCwd = (p) =>
   path.isAbsolute(p) ? p : path.resolve(process.env.LOCALMCP_CWD || CWD, p);
 
-function run(command: string, cwd?: string): Promise<string> {
+function run(command, cwd) {
   return new Promise((resolve) => {
     execCb(
       command,
@@ -93,7 +93,7 @@ const TOOLS = [
   },
 ];
 
-async function callTool(name: string, args: any): Promise<{ text: string; isError: boolean }> {
+async function callTool(name, args) {
   try {
     switch (name) {
       case "run_command":
@@ -118,12 +118,12 @@ async function callTool(name: string, args: any): Promise<{ text: string; isErro
       default:
         return { text: `unknown tool: ${name}`, isError: true };
     }
-  } catch (e: any) {
+  } catch (e) {
     return { text: `[error] ${e.message ?? String(e)}`, isError: true };
   }
 }
 
-async function handle(body: any): Promise<any | null> {
+async function handle(body) {
   const id = body?.id ?? null;
   switch (body?.method ?? "") {
     case "initialize":
@@ -163,16 +163,16 @@ async function handle(body: any): Promise<any | null> {
   }
 }
 
-const authorized = (req: http.IncomingMessage, path: string): boolean => {
+const authorized = (req, urlPath) => {
   const auth = req.headers.authorization;
   if (auth === `Bearer ${TOKEN}`) return true;
-  const m = /^\/mcp\/([0-9a-f]{8,64})$/.exec(path);
+  const m = /^\/mcp\/([0-9a-f]{8,64})$/.exec(urlPath);
   return m !== null && m[1] === TOKEN;
 };
 
 const server = http.createServer((req, res) => {
-  const chunks: Buffer[] = [];
-  let body: any = {};
+  const chunks = [];
+  let body = {};
   req.on("data", (c) => chunks.push(c));
   req.on("end", async () => {
     const url = (req.url ?? "").split("?")[0];
@@ -198,7 +198,7 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(out));
       }
-    } catch (e: any) {
+    } catch (e) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ jsonrpc: "2.0", id: body?.id ?? null, error: { code: -32603, message: String(e?.message ?? e) } }));
     }
