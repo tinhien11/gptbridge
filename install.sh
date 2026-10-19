@@ -20,11 +20,34 @@ set -euo pipefail
 # Override the tunnel-client version (default: latest GitHub release):
 #   GPTBRIDGE_TC_VERSION=v0.0.16 bash install.sh ...
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 BIN_DIR="$HOME/.local/bin"
 SVC_DIR="$HOME/.config/systemd/user"
 GB_DIR="$HOME/.gptbridge"
+APP_DIR="$HOME/.local/share/gptbridge"
 NODE_BIN="$(command -v node || { echo "ERROR: node not found"; exit 1; })"
+
+# where to fetch server.mjs / install.sh for remote (curl | bash) installs;
+# pin a version with GPTBRIDGE_REF=v1.2.3
+REPO_RAW="${GPTBRIDGE_REPO_RAW:-https://raw.githubusercontent.com/tinhien11/gptbridge/${GPTBRIDGE_REF:-master}}"
+
+if command -v curl >/dev/null 2>&1; then
+  fetch() { curl -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then
+  fetch() { wget -qO "$1" "$2"; }
+else
+  echo "ERROR: need curl or wget"; exit 1
+fi
+
+# curl | bash support: with the script on stdin, interactive prompts would
+# eat the remaining script text. Materialize the canonical script and re-exec
+# it with the terminal as stdin. CI (no tty anywhere) skips this and runs
+# non-interactive.
+if [ -z "${GPTBRIDGE_EXECED:-}" ] && [ ! -t 0 ] && { [ -t 1 ] || [ -t 2 ]; } && [ -c /dev/tty ]; then
+  TMP_SELF="$(mktemp /tmp/gptbridge-install.XXXXXX.sh)"
+  fetch "$TMP_SELF" "$REPO_RAW/install.sh"
+  GPTBRIDGE_EXECED=1 exec bash "$TMP_SELF" "$@" < /dev/tty
+fi
 
 TUNNEL="" TUNNEL_ID="" API_KEY=""
 for a in "$@"; do
@@ -56,19 +79,30 @@ ask() {
 }
 
 # --- step 1: server files ---
-if ! ask "Install gptbridge server? (writes $BIN_DIR/gptbridge, $SVC_DIR/gptbridge.service, $GB_DIR/token)"; then
+# server.mjs: use it from this checkout when present (dev mode - the service
+# runs the repo file), otherwise download it (curl | bash)
+if [ -n "$DIR" ] && [ -f "$DIR/server.mjs" ]; then
+  SERVER_MJS="$DIR/server.mjs"
+else
+  SERVER_MJS="$APP_DIR/server.mjs"
+fi
+if ! ask "Install gptbridge server? (writes $BIN_DIR/gptbridge, $SVC_DIR/gptbridge.service, $GB_DIR/token, server code at $SERVER_MJS)"; then
   echo "Aborted - nothing was written."
   exit 0
 fi
 
-mkdir -p "$BIN_DIR" "$SVC_DIR" "$SVC_DIR/default.target.wants" "$GB_DIR"
+mkdir -p "$BIN_DIR" "$SVC_DIR" "$SVC_DIR/default.target.wants" "$GB_DIR" "$APP_DIR"
+
+if [ "$SERVER_MJS" = "$APP_DIR/server.mjs" ]; then
+  fetch "$SERVER_MJS" "$REPO_RAW/server.mjs"
+fi
 
 # server launcher (absolute node path: systemd has no nvm PATH) + CLI
 cat > "$BIN_DIR/gptbridge" <<L
 #!/usr/bin/env bash
 # gptbridge CLI: no args = run server | log = live tool calls | status | tunnel
 case "\${1:-}" in
-  "") exec "$NODE_BIN" "$DIR/server.mjs" ;;
+  "") exec "$NODE_BIN" "$SERVER_MJS" ;;
   log) exec journalctl --user -u gptbridge.service -f -o cat ;;
   tunnel) exec journalctl --user -u gptbridge-tunnel.service -f -o cat ;;
   status)
@@ -179,13 +213,6 @@ setup_openai_tunnel() {
     echo
     echo "tunnel-client already installed: $("$BIN_DIR/tunnel-client" --version 2>/dev/null | head -1)"
   else
-    if command -v curl >/dev/null 2>&1; then
-      fetch() { curl -fsSL -o "$1" "$2"; }
-    elif command -v wget >/dev/null 2>&1; then
-      fetch() { wget -qO "$1" "$2"; }
-    else
-      echo "ERROR: need curl or wget to download tunnel-client"; return 1
-    fi
     command -v unzip >/dev/null 2>&1 || { echo "ERROR: need unzip"; return 1; }
 
     TC_VER="${GPTBRIDGE_TC_VERSION:-}"
