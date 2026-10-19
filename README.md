@@ -65,7 +65,7 @@ bash install.sh --tunnel=none
 
 ## Connect ChatGPT
 
-Open **[chatgpt.com/plugins](https://chatgpt.com/plugins)** → **＋ → Add custom MCP**:
+Open **[chatgpt.com/plugins](https://chatgpt.com/plugins)** → **+ → Add custom MCP**:
 
 - **Secure MCP Tunnel**: **Connection: Tunnel** → pick your tunnel
 - Public tunnel: **Connection: URL** → `https://<your-tunnel>/mcp/<token>`
@@ -112,15 +112,21 @@ gptbridge tunnel   # live tunnel log
 
 ## Security — read this
 
-The connector allows **arbitrary command execution on your machine**.
+The connector gives ChatGPT **arbitrary command execution on your machine**.
+What stands in front of that depends on the tunnel:
 
-- The Secure MCP Tunnel keeps everything private: no public URL, no inbound
-  ports, only outbound HTTPS to `api.openai.com`. The runtime API key lives
-  in `~/.gptbridge/tunnel.env` (chmod 600) — give it *Tunnels Read + Use*
-  only, never an admin key
-- With a public tunnel, the URL contains the token — keep it secret
-  (`~/.gptbridge/token`) and rotate it (delete the token file, restart) if it leaks
-- Anyone who reaches the endpoint can run commands
+- **Secure MCP Tunnel (default)** — nothing is exposed to the internet: the
+  server binds to `127.0.0.1` and only `tunnel-client` dials out to OpenAI.
+  Tool calls are gated by your OpenAI org: whoever can select your tunnel in
+  ChatGPT (members of your workspace — just you on a personal account) can
+  run commands, and OpenAI's control plane brokers every call. The runtime
+  API key lives in `~/.gptbridge/tunnel.env` (chmod 600) — give it
+  *Tunnels Read + Use* only, never an admin key.
+- **Public tunnel (cloudflared, ngrok, ...)** — anyone holding the URL can
+  run commands. The URL contains the token, and token-in-path leaks the way
+  URLs do (shell history, logs, screenshots, referers). Keep it secret and
+  rotate on leak: delete `~/.gptbridge/token`, restart, update the connector
+  URL in ChatGPT.
 
 ## Configuration
 
@@ -140,7 +146,7 @@ Tunnel env (written to `~/.gptbridge/tunnel.env` by the wizard):
 | `CONTROL_PLANE_API_KEY` | Runtime API key (Tunnels Read + Use) |
 | `CONTROL_PLANE_TUNNEL_ID` | `tunnel_...` from Platform → Tunnels |
 | `MCP_SERVER_URL` | Local MCP endpoint incl. token (`http://127.0.0.1:8790/mcp/<token>`) |
-| `HEALTH_LISTEN_ADDR` | tunnel-client health UI (default `127.0.0.1:18790`) |
+| `HEALTH_LISTEN_ADDR` | tunnel-client health UI (the wizard sets `127.0.0.1:18790`) |
 
 ## License
 
