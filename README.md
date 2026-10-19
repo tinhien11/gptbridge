@@ -1,46 +1,59 @@
 # gptbridge — give ChatGPT's web UI hands
 
-Use **ChatGPT's web UI as a local coding agent**: an MCP server that gives
-ChatGPT native tools on your machine — run shell commands, read/write files,
-list directories. No API keys, no text protocols: ChatGPT calls these tools
-natively through its **Connectors** feature.
+ChatGPT runs in the cloud. Your shell and files are on your machine.
+**gptbridge bridges the two**: an MCP server on your machine plus a
+**tunnel** so ChatGPT can call it — private by default, no public URL,
+no inbound ports.
 
 ```
-ChatGPT (web)  ──MCP──>  gptbridge (:8790)  ──>  your shell & files
+ChatGPT (web)  ──tunnel──>  gptbridge (:8790)  ──>  your shell & files
 ```
 
-## Why
-
-Web chats are the easiest way to reach a frontier model — but out of the box
-they can't touch your machine. gptbridge exposes a small MCP endpoint that
-ChatGPT registers as a connector; from then on ChatGPT runs `gh`, `git`,
-build tools, and edits real files on your machine as native tool calls.
+**A free ChatGPT account is enough** — no Plus, no Developer mode. Add the
+server at [chatgpt.com/plugins](https://chatgpt.com/plugins) → **Add custom MCP**.
 
 ## Requirements
 
 - Node.js 18+
-- ChatGPT account with **custom MCP connectors** (Plus/Pro, Developer mode)
-- Optional: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-  to expose the endpoint publicly
+- Linux with systemd (the installer sets up autostart; on macOS run
+  `node server.mjs` by hand)
+- Any ChatGPT account (web only — custom MCP is not available on mobile)
 
 ## Install
+
+One-liner (downloads everything from GitHub):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tinhien11/gptbridge/master/install.sh | bash
+```
+
+Or from a checkout (the service then runs the repo's `server.mjs` directly —
+handy when hacking on it):
 
 ```bash
 bash install.sh
 ```
 
-This installs `~/.local/bin/gptbridge`, a `gptbridge.service` (systemd user
-unit, autostart), generates a token at `~/.gptbridge/token`, then asks how
-ChatGPT should reach this machine:
+The wizard asks `[Y/n]` (Enter = yes) before every step that writes to your
+machine, then asks how ChatGPT should reach you — **the tunnel is the
+interesting part**:
 
-1. **OpenAI Secure MCP Tunnel** (default, recommended) — private connection,
-   no public URL, no inbound ports. The wizard downloads
-   [tunnel-client](https://github.com/openai/tunnel-client), verifies its
-   checksum, installs a `gptbridge-tunnel.service`, and only asks you to paste
-   two values you create in the [OpenAI Platform](https://platform.openai.com/settings/organization/tunnels):
-   a **tunnel id** and a **Runtime API key** (permission: *Tunnels Read + Use*).
-2. **cloudflared quick tunnel** — public URL, changes every start.
-3. **Skip** — wire the tunnel yourself.
+1. **OpenAI Secure MCP Tunnel** (default, recommended) — a private connection.
+   Nothing is exposed to the internet: the `tunnel-client` daemon on your
+   machine dials out to OpenAI's control plane, ChatGPT's tool calls flow
+   back down the same connection. You paste two values you create in the
+   [OpenAI Platform](https://platform.openai.com/settings/organization/tunnels)
+   (the prompts show the exact URLs):
+   - a **tunnel id** — Platform → Tunnels → *Create a tunnel*
+   - a **runtime API key** — Platform → API keys, permission *Tunnels Read + Use*
+   The wizard downloads `tunnel-client` (checksum verified), writes the key
+   to `~/.gptbridge/tunnel.env` (chmod 600) and installs a
+   `gptbridge-tunnel.service` that keeps the connection alive and reconnects
+   on failure.
+2. **cloudflared quick tunnel** — a public `trycloudflare.com` URL; changes
+   every start. You add it to ChatGPT as a plain URL.
+3. **Skip** — wire any tunnel yourself (ngrok, tailscale funnel, ...), then
+   add its public URL in ChatGPT.
 
 Non-interactive:
 
@@ -52,27 +65,22 @@ bash install.sh --tunnel=none
 
 ## Connect ChatGPT
 
-Open **[chatgpt.com/plugins](https://chatgpt.com/plugins)** → **Add custom MCP**.
+Open **[chatgpt.com/plugins](https://chatgpt.com/plugins)** → **＋ → Add custom MCP**:
 
-**Secure MCP Tunnel** (from the wizard above):
-**Connection: Tunnel** → pick your tunnel → **Authentication: No
-authentication** (the token is already in the local path).
+- **Secure MCP Tunnel**: **Connection: Tunnel** → pick your tunnel
+- Public tunnel: **Connection: URL** → `https://<your-tunnel>/mcp/<token>`
 
-**Public URL** (cloudflared or any tunnel):
-- **MCP server URL**: `https://<your-tunnel>/mcp/<token>`
-- **Authentication**: No authentication (the token is in the path)
+**Authentication: No authentication** either way — the token is in the local
+path. Accept the risk warning → **Create as a plugin**.
 
 ## Use it
 
-In a chat, enable the **gptbridge** connector (Developer mode toggle), then
-just ask:
+In a chat, type `@` and pick **gptbridge**, then just ask:
 
 ```
 run hostname on my machine
 ```
 → `tin` — executed for real.
-
-More things to try:
 
 ```
 list the files in ~/projects
@@ -81,23 +89,17 @@ create /tmp/hello.txt containing 'hi'
 run gh pr list in ~/projects/gptbridge and summarize the open PRs
 ```
 
-`run_command` accepts an optional `cwd` (defaults to your home). Output is
-capped at ~20k chars per call, file reads at ~50k.
-
 ## Watch it work
 
-Every tool call is logged with its duration, so when a call feels slow you
-can see whether the time went to the command itself or to the round trip
+Every tool call is logged with its duration — when a call feels slow, the log
+tells you whether the time went to the command itself or to the round trip
 (model + tunnel):
 
 ```bash
 gptbridge log      # live: every tool call ChatGPT makes, with durations
-gptbridge status   # service state, endpoint ping, last tool calls
-gptbridge tunnel   # live tunnel-client log
+gptbridge status   # service state, endpoint ping, tunnel state, last calls
+gptbridge tunnel   # live tunnel log
 ```
-
-The Secure MCP Tunnel also serves a local UI with connection health:
-[http://127.0.0.1:18790](http://127.0.0.1:18790) (`/ui`, `/healthz`, `/metrics`).
 
 ## Tools
 
@@ -112,15 +114,17 @@ The Secure MCP Tunnel also serves a local UI with connection health:
 
 The connector allows **arbitrary command execution on your machine**.
 
-- **Secure MCP Tunnel** keeps everything private: no public URL, only
-  outbound HTTPS to `api.openai.com`. The runtime API key lives in
-  `~/.gptbridge/tunnel.env` (chmod 600) — give it *Tunnels Read + Use* only,
-  never an admin key.
+- The Secure MCP Tunnel keeps everything private: no public URL, no inbound
+  ports, only outbound HTTPS to `api.openai.com`. The runtime API key lives
+  in `~/.gptbridge/tunnel.env` (chmod 600) — give it *Tunnels Read + Use*
+  only, never an admin key
 - With a public tunnel, the URL contains the token — keep it secret
   (`~/.gptbridge/token`) and rotate it (delete the token file, restart) if it leaks
 - Anyone who reaches the endpoint can run commands
 
 ## Configuration
+
+Server env (put overrides in `~/.gptbridge/env`, the systemd unit reads it):
 
 | Env | Default | Purpose |
 |---|---|---|
@@ -129,7 +133,7 @@ The connector allows **arbitrary command execution on your machine**.
 | `LOCALMCP_CWD` | `$HOME` | Default working directory for `run_command` |
 | `LOCALMCP_TIMEOUT` | `120000` | Command timeout (ms) |
 
-Tunnel (written to `~/.gptbridge/tunnel.env` by the wizard):
+Tunnel env (written to `~/.gptbridge/tunnel.env` by the wizard):
 
 | Env | Purpose |
 |---|---|
