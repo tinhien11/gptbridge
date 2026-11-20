@@ -65,6 +65,7 @@ read ~/.gitconfig and summarize it
 | `read_file` | File content (~50k chars max) |
 | `write_file` | Create/overwrite a file |
 | `list_dir` | Directory listing |
+| `chatgpt_delegate` | Send a prompt to ChatGPT web (Chrome CDP), return its reply. Optional `session` continues the same conversation; `new_chat` forces a fresh one. Slow; see WEB-AGENT.md |
 
 ## Watch
 
@@ -89,12 +90,10 @@ A self-wired public tunnel is your risk: anyone with its URL can run commands. O
 
 [billion-context](https://github.com/ranxianglei/billion-context) folds long coding sessions so a small context window lasts. gptbridge bridges it to ChatGPT as **three extra tools**: `compress`, `decompress`, `acp_status`.
 
-Optional and auto-detected. Nothing to configure if you do not install it — the tools are absent from `tools/list` and gptbridge behaves as before. When a bili proxy is running, gptbridge finds its origin at runtime and forwards the calls; no path, port or version is hardcoded.
+Optional and auto-detected. Nothing to configure if you do not install it — the tools are absent from `tools/list`. When a bili proxy is running, gptbridge finds its origin at runtime; no path, port or version is hardcoded.
 
-- Set `GPTBRIDGE_BILI_ORIGIN=http://127.0.0.1:8787` if auto-detection misses.
-- Set `GPTBRIDGE_BILI_DISABLE=1` to hide the tools even when a proxy exists.
-- `compress` does not read ChatGPT's transcript — bili only sees sessions that pass through it. Call `acp_status` for real `mNNNNN` refs, then ChatGPT writes its own ≥50-char summaries into `content` (one string of `mNNNNN–mNNNNN topic` blocks). Empty or short summaries are refused.
-- Pass `conversation_id` when known; otherwise bili uses its single active session. ChatGPT traffic does not flow through bili by default, so the summaries come from the model's own context.
+- `GPTBRIDGE_BILI_ORIGIN` overrides detection; `GPTBRIDGE_BILI_DISABLE=1` hides the tools.
+- `compress` takes `content` — one string of `mNNNNN–mNNNNN topic` blocks with ≥50-char summaries written by the model itself (bili cannot see ChatGPT's transcript). Call `acp_status` first for real refs.
 
 ## Configuration
 
@@ -106,6 +105,9 @@ Server env (`~/.gptbridge/env`):
 | `LOCALMCP_HOST` | `127.0.0.1` | Bind address |
 | `LOCALMCP_CWD` | `$HOME` | Default `run_command` dir |
 | `LOCALMCP_TIMEOUT` | `120000` | Command timeout (ms) |
+| `GPTBRIDGE_CDP_HTTP` | `http://127.0.0.1:9222` | Chrome debug endpoint for `chatgpt_delegate` |
+| `GPTBRIDGE_WEB_URL` | `https://chatgpt.com/` | Chat page the web agent drives |
+| `GPTBRIDGE_WEB_SESSIONS` | `~/.gptbridge/web-sessions.json` | Session key → conversation id |
 
 Tunnel env (`~/.gptbridge/tunnel.env`):
 

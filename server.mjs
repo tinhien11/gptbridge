@@ -68,6 +68,11 @@ function run(command, cwd) {
   });
 }
 
+// --- optional web-agent bridge (see WEB-AGENT.md) --------------------------
+// Loads lazily so the MCP server runs fine when Chrome/CDP is absent.
+let webDelegate = async () => { throw new Error("web-agent module not loaded"); };
+try { ({ delegate: webDelegate } = await import("./web-agent.mjs")); } catch { /* optional */ }
+
 // --- optional billion-context bridge -------------------------------------
 // billion-context is an HTTP proxy that folds LLM context. It is NOT required:
 // with no proxy installed these tools stay out of tools/list. The origin is
@@ -242,6 +247,21 @@ const TOOLS = [
     description: "List entries of a directory on the user's real machine.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   },
+  {
+    name: "chatgpt_delegate",
+    description:
+      "Delegate a task to the ChatGPT web UI running in the shared Chrome (CDP). Sends the prompt into the composer, waits for the response to finish, returns the assistant text. Reuses the conversation for the same session key across calls so follow-ups keep context. Slow (tens of seconds); do not use for quick lookups.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Message to send to ChatGPT" },
+        session: { type: "string", description: "Session key; same key continues the same conversation" },
+        new_chat: { type: "boolean", description: "Force a fresh chat instead of continuing the session" },
+        timeout_s: { type: "number", description: "Max seconds to wait for the response (default 180)" },
+      },
+      required: ["prompt"],
+    },
+  },
 ];
 
 const activeTools = async () => (await biliOrigin()) ? [...TOOLS, ...BILI_TOOLS] : TOOLS;
@@ -272,6 +292,15 @@ async function callTool(name, args) {
       case "decompress":
       case "acp_status":
         return forwardBili(name, args);
+      case "chatgpt_delegate": {
+        const r = await webDelegate({
+          prompt: String(args.prompt ?? ""),
+          session: args.session ? String(args.session) : undefined,
+          new_chat: Boolean(args.new_chat),
+          timeout_s: args.timeout_s ? Number(args.timeout_s) : undefined,
+        });
+        return { text: JSON.stringify(r), isError: r?.status === "error" };
+      }
       default:
         return { text: `unknown tool: ${name}`, isError: true };
     }

@@ -58,3 +58,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-bili-test.mjs
   EXPECT: GPTBRIDGE_BILI_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BILI_OK
+
+- [x] G12: chatgpt_delegate drives a mock chat page over CDP (send -> poll -> done text), session reuse, no hardcoded /home path
+  CHECK: node /tmp/gptbridge-web-test.mjs
+  EXPECT: GPTBRIDGE_WEB_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_WEB_OK
