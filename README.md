@@ -79,6 +79,16 @@ This gives ChatGPT **arbitrary command execution on this machine**. The tunnel k
 
 A self-wired public tunnel is your risk: anyone with its URL can run commands. On leak, delete `~/.gptbridge/token`, restart, update the connector.
 
+## Optional: billion-context
+
+[billion-context](https://github.com/ranxianglei/billion-context) folds long coding sessions so a small context window lasts. gptbridge bridges it to ChatGPT as **three extra tools**: `compress`, `decompress`, `acp_status`.
+
+Optional and auto-detected. Nothing to configure if you do not install it — the tools are absent from `tools/list` and gptbridge behaves as before. When a bili proxy is running, gptbridge finds its origin at runtime and forwards the calls; no path, port or version is hardcoded.
+
+- Set `GPTBRIDGE_BILI_ORIGIN=http://127.0.0.1:8787` if auto-detection misses.
+- Set `GPTBRIDGE_BILI_DISABLE=1` to hide the tools even when a proxy exists.
+- Pass `conversation_id` when known; otherwise bili uses its single active session. ChatGPT traffic does not flow through bili by default, so you usually need to create a bili session first (e.g. via DSH/Codex on the same machine).
+
 ## Configuration
 
 Server env (`~/.gptbridge/env`):

@@ -148,7 +148,8 @@ GBPORT="${GBPORT:-8790}"
 code=""
 if ask "Enable + start gptbridge.service now?"; then
   systemctl --user daemon-reload
-  systemctl --user enable --now gptbridge.service
+  systemctl --user enable gptbridge.service
+  systemctl --user restart gptbridge.service
   # wait for the MCP endpoint to answer (max ~10s), never abort the installer on it
   if command -v curl >/dev/null 2>&1; then
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do

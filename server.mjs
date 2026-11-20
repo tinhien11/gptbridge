@@ -68,6 +68,112 @@ function run(command, cwd) {
   });
 }
 
+// --- optional billion-context bridge -------------------------------------
+// billion-context is an HTTP proxy that folds LLM context. It is NOT required:
+// with no proxy installed these tools stay out of tools/list. The origin is
+// discovered at runtime (explicit env > bili env > XDG instance file); no
+// install path or package version is baked into gptbridge.
+const BILI_DISABLED = /^(1|true|yes|on)$/i.test(process.env.GPTBRIDGE_BILI_DISABLE || "");
+const BILI_CACHE_MS = 10_000;
+let biliCache = { at: 0, origin: null, promise: null };
+
+function biliInstanceFile() {
+  const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+  return path.join(state, "billion-context", "proxy-origin");
+}
+
+function biliCandidateOrigins() {
+  const out = [];
+  for (const key of ["GPTBRIDGE_BILI_ORIGIN", "BILI_MCP_PROXY", "BILLION_CONTEXT_PROXY"]) {
+    const v = (process.env[key] || "").trim().replace(/;$/, "").replace(/\/+$/, "");
+    if (/^https?:\/\/\S+$/.test(v)) out.push(v);
+  }
+  try {
+    const raw = fs.readFileSync(biliInstanceFile(), "utf8").trim();
+    const origin = raw.startsWith("{") ? JSON.parse(raw).origin : raw;
+    if (typeof origin === "string" && /^https?:\/\/\S+$/.test(origin)) {
+      out.push(origin.replace(/\/+$/, ""));
+    }
+  } catch {}
+  return [...new Set(out)];
+}
+
+async function biliOrigin() {
+  if (BILI_DISABLED) return null;
+  const now = Date.now();
+  if (now - biliCache.at < BILI_CACHE_MS) return biliCache.origin;
+  if (biliCache.promise) return biliCache.promise;
+  biliCache.promise = (async () => {
+    let found = null;
+    for (const origin of biliCandidateOrigins()) {
+      try {
+        const res = await fetch(`${origin}/__bili/health`, { signal: AbortSignal.timeout(2_000) });
+        if (res.ok) { found = origin; break; }
+      } catch {}
+    }
+    biliCache = { at: Date.now(), origin: found, promise: null };
+    return found;
+  })();
+  return biliCache.promise;
+}
+
+async function forwardBili(tool, args) {
+  const origin = await biliOrigin();
+  if (!origin) {
+    return { text: "billion-context is not installed or reachable; gptbridge works without it.", isError: true };
+  }
+  const conversationId = String(args.conversation_id ?? args.conversationId ?? "").trim();
+  const bodyArgs = { ...args };
+  delete bodyArgs.conversation_id;
+  delete bodyArgs.conversationId;
+  const payload = { tool, args: bodyArgs };
+  if (conversationId) payload.conversationId = conversationId;
+  try {
+    const res = await fetch(`${origin}/__bili/plugin/tool`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      return { text: `[billion-context] ${data?.error || `HTTP ${res.status}`}`, isError: true };
+    }
+    const text = typeof data.result === "string" ? data.result : JSON.stringify(data.result ?? "");
+    return { text, isError: false };
+  } catch (e) {
+    return { text: `[billion-context] ${e.message ?? String(e)}`, isError: true };
+  }
+}
+
+const BILI_TOOLS = [
+  {
+    name: "compress",
+    description:
+      "Fold this conversation's history with billion-context (optional). Pass conversation_id when known; otherwise the proxy uses its active session. If bili is not installed this tool is absent.",
+    inputSchema: {
+      type: "object",
+      properties: { conversation_id: { type: "string", description: "bili conversation id (optional)" } },
+    },
+  },
+  {
+    name: "decompress",
+    description: "Restore a compressed context block from billion-context.",
+    inputSchema: {
+      type: "object",
+      properties: { conversation_id: { type: "string" }, ref: { type: "string" } },
+    },
+  },
+  {
+    name: "acp_status",
+    description: "Read billion-context compression status for this conversation.",
+    inputSchema: {
+      type: "object",
+      properties: { conversation_id: { type: "string" } },
+    },
+  },
+];
+
 const TOOLS = [
   {
     name: "run_command",
@@ -103,6 +209,8 @@ const TOOLS = [
   },
 ];
 
+const activeTools = async () => (await biliOrigin()) ? [...TOOLS, ...BILI_TOOLS] : TOOLS;
+
 async function callTool(name, args) {
   try {
     switch (name) {
@@ -125,6 +233,10 @@ async function callTool(name, args) {
         const p = resolveInCwd(String(args.path ?? "."));
         return { text: fs.readdirSync(p).join("\n"), isError: false };
       }
+      case "compress":
+      case "decompress":
+      case "acp_status":
+        return forwardBili(name, args);
       default:
         return { text: `unknown tool: ${name}`, isError: true };
     }
@@ -154,7 +266,7 @@ async function handle(body) {
     case "ping":
       return reply(id, {});
     case "tools/list":
-      return reply(id, { tools: TOOLS });
+      return reply(id, { tools: await activeTools() });
     case "tools/call": {
       const { text, isError } = await callTool(
         String(body?.params?.name ?? ""),
