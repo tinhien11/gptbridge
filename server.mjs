@@ -169,7 +169,7 @@ const BILI_TOOLS = [
   {
     name: "compress",
     description:
-      "Fold consumed conversation ranges into self-contained summaries (billion-context). content = ONE plain string: each block starts with an 'mNNNNN–mNNNNN optional topic' header line followed by its summary markdown. Write the summaries yourself from context you have; bili cannot see ChatGPT's transcript. Batch all blocks into ONE call. An empty call is refused. conversation_id is optional and only selects the bili session.",
+      "Fold consumed conversation ranges into self-contained summaries (billion-context). Call acp_status first to get refs and compressible ranges. Then content = ONE plain string with all blocks; each block = header line 'mNNNNN–mNNNNN optional topic' followed by its summary markdown. Refs must be real mNNNNN ids from this conversation. Each summary must be self-contained and at least 50 characters; bili cannot see ChatGPT's transcript, so write summaries from your own context. Batch all blocks into ONE call. Never call with empty content. conversation_id is optional (selects the bili session).",
     inputSchema: {
       type: "object",
       properties: {
