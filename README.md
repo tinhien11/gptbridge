@@ -49,13 +49,7 @@ Accept the risk warning → **Create as a plugin**.
 
 ## Use
 
-Enable the gptbridge connector in a chat, then ask:
-
-```
-run hostname on my machine
-list the files in ~/projects
-read ~/.gitconfig and summarize it
-```
+Enable the gptbridge connector in a chat, then ask (e.g. `run hostname`, `list ~/projects`).
 
 ## Tools
 
@@ -65,7 +59,7 @@ read ~/.gitconfig and summarize it
 | `read_file` | File content (~50k chars max) |
 | `write_file` | Create/overwrite a file |
 | `list_dir` | Directory listing |
-| `chatgpt_delegate` | Send a prompt to ChatGPT web (Chrome CDP), return its reply. Optional `session` continues the same conversation; `new_chat` forces a fresh one. Slow; see WEB-AGENT.md |
+| `chatgpt_delegate` | Prompt ChatGPT web via Chrome CDP. ONE prompt per task (checklist + log/output files, `new_chat`); no multi-turn chains. Progress `~/.gptbridge/tasks/<session>.log`; `GPTBRIDGE_WEB_PROGRESS=0` off. See WEB-AGENT.md |
 
 ## Watch
 
