@@ -77,24 +77,43 @@ const BILI_DISABLED = /^(1|true|yes|on)$/i.test(process.env.GPTBRIDGE_BILI_DISAB
 const BILI_CACHE_MS = 10_000;
 let biliCache = { at: 0, origin: null, promise: null };
 
-function biliInstanceFile() {
+function biliStateDir() {
   const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-  return path.join(state, "billion-context", "proxy-origin");
+  return path.join(state, "billion-context");
+}
+
+function biliInstanceFile() {
+  return path.join(biliStateDir(), "proxy-origin");
+}
+
+function originFromJson(value) {
+  const origin = typeof value === "string" ? (value.startsWith("{") ? JSON.parse(value).origin : value) : value?.origin;
+  return typeof origin === "string" && /^https?:\/\/\S+$/.test(origin) ? origin.replace(/\/+$/, "") : null;
 }
 
 function biliCandidateOrigins() {
   const out = [];
+  const push = (v) => { if (v) out.push(v); };
   for (const key of ["GPTBRIDGE_BILI_ORIGIN", "BILI_MCP_PROXY", "BILLION_CONTEXT_PROXY"]) {
     const v = (process.env[key] || "").trim().replace(/;$/, "").replace(/\/+$/, "");
-    if (/^https?:\/\/\S+$/.test(v)) out.push(v);
+    if (/^https?:\/\/\S+$/.test(v)) push(v);
   }
+  const state = biliStateDir();
   try {
-    const raw = fs.readFileSync(biliInstanceFile(), "utf8").trim();
-    const origin = raw.startsWith("{") ? JSON.parse(raw).origin : raw;
-    if (typeof origin === "string" && /^https?:\/\/\S+$/.test(origin)) {
-      out.push(origin.replace(/\/+$/, ""));
-    }
+    push(originFromJson(fs.readFileSync(biliInstanceFile(), "utf8").trim()));
   } catch {}
+  // bili 0.1.213 writes instances/<id>.json and writers/<id>.json, not proxy-origin.
+  for (const sub of ["instances", "writers"]) {
+    let names = [];
+    try {
+      names = fs.readdirSync(path.join(state, sub)).filter((n) => n.endsWith(".json"));
+    } catch {}
+    for (const name of names) {
+      try {
+        push(originFromJson(JSON.parse(fs.readFileSync(path.join(state, sub, name), "utf8"))));
+      } catch {}
+    }
+  }
   return [...new Set(out)];
 }
 

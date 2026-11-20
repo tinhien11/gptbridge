@@ -43,3 +43,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-rerun-test.mjs
   EXPECT: GPTBRIDGE_RERUN_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_RERUN_OK
+
+- [x] G9: bili 0.1.213 instance-file discovery (instances/*.json) works without env override
+  CHECK: node /tmp/gptbridge-bili-test.mjs
+  EXPECT: GPTBRIDGE_BILI_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BILI_OK
