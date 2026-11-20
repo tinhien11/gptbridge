@@ -265,6 +265,7 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
   if (result?.status === "done" && result.text) {
     transcripts[key].turns.push({ prompt: actualPrompt, reply: result.text.slice(0, 6_000) });
     saveTranscripts();
+    writeFinal(key, result);
   }
   if (result?.conversationId) rememberSession(key, result.conversationId);
   // chat refused the message -> fresh chat, retry once
@@ -276,6 +277,7 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
     if (retry?.status === "done" && retry.text) {
       transcripts[key].turns.push({ prompt: actualPrompt, reply: retry.text.slice(0, 6_000) });
       saveTranscripts();
+      writeFinal(key, retry);
     }
     if (retry?.conversationId) rememberSession(key, retry.conversationId);
     return retry;
@@ -361,6 +363,20 @@ async function maybeCompress(key) {
     tr.turns = tr.turns.slice(-KEEP_RECENT);
     saveTranscripts();
   }
+}
+
+// Persist the final reply so task_status can report completion without DOM polling.
+function writeFinal(key, result) {
+  try {
+    const dir = path.join(os.homedir(), ".gptbridge", "tasks");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${key}.final`), JSON.stringify({
+      text: result.text.slice(0, 8_000),
+      conversationId: result.conversationId ?? null,
+      status: result.status,
+      at: new Date().toISOString(),
+    }));
+  } catch { /* best effort */ }
 }
 
 // Ask ChatGPT to append progress to a local file via the write_file tool so

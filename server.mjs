@@ -262,6 +262,16 @@ const TOOLS = [
       required: ["prompt"],
     },
   },
+  {
+    name: "task_status",
+    description:
+      "Check progress of a delegated task: number of steps logged, latest log line, and the final reply once the task finished. Poll this instead of re-sending prompts to ChatGPT.",
+    inputSchema: {
+      type: "object",
+      properties: { session: { type: "string", description: "Session key used in chatgpt_delegate" } },
+      required: ["session"],
+    },
+  },
 ];
 
 const activeTools = async () => (await biliOrigin()) ? [...TOOLS, ...BILI_TOOLS] : TOOLS;
@@ -300,6 +310,20 @@ async function callTool(name, args) {
           timeout_s: args.timeout_s ? Number(args.timeout_s) : undefined,
         });
         return { text: JSON.stringify(r), isError: r?.status === "error" };
+      }
+      case "task_status": {
+        const key = String(args.session ?? "default").replace(/[^a-zA-Z0-9._-]/g, "_");
+        const file = path.join(os.homedir(), ".gptbridge", "tasks", `${key}.log`);
+        let log = "";
+        try { log = fs.readFileSync(file, "utf8").slice(-4_000); } catch { /* no log yet */ }
+        const steps = log ? log.split("\n").filter(Boolean) : [];
+        const replyFile = path.join(os.homedir(), ".gptbridge", "tasks", `${key}.final`);
+        let final = null;
+        try { final = JSON.parse(fs.readFileSync(replyFile, "utf8")); } catch { /* not finished */ }
+        return {
+          text: JSON.stringify({ session: key, steps_done: steps.length, last_step: steps[steps.length - 1] ?? "", finished: Boolean(final), reply: final?.text ?? null }),
+          isError: false,
+        };
       }
       default:
         return { text: `unknown tool: ${name}`, isError: true };

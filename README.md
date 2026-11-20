@@ -59,7 +59,8 @@ Enable the gptbridge connector in a chat, then ask (e.g. `run hostname`, `list ~
 | `read_file` | File content (~50k chars max) |
 | `write_file` | Create/overwrite a file |
 | `list_dir` | Directory listing |
-| `chatgpt_delegate` | Prompt ChatGPT web via Chrome CDP. ONE prompt per task (checklist + log/output files, `new_chat`); no multi-turn chains. Progress `~/.gptbridge/tasks/<session>.log`; `GPTBRIDGE_WEB_PROGRESS=0` off. See WEB-AGENT.md |
+| `chatgpt_delegate` | Prompt ChatGPT web via Chrome CDP. ONE prompt per task (checklist + log/output files, `new_chat`); no multi-turn chains. Progress `~/.gptbridge/tasks/<session>.log`. See SKILL.md |
+| `task_status` | Delegated-task progress `{steps_done, last_step, finished, reply}`; poll it, never re-prompt the session |
 
 ## Watch
 
@@ -101,9 +102,8 @@ Server env (`~/.gptbridge/env`):
 | `LOCALMCP_TIMEOUT` | `120000` | Command timeout (ms) |
 | `GPTBRIDGE_CDP_HTTP` | `http://127.0.0.1:9222` | Chrome debug endpoint for `chatgpt_delegate` |
 | `GPTBRIDGE_WEB_URL` | `https://chatgpt.com/` | Chat page the web agent drives |
-| `GPTBRIDGE_WEB_SESSIONS` | `~/.gptbridge/web-sessions.json` | Session key → conversation id |
-| `GPTBRIDGE_WEB_COMPRESS_CHARS` | `60000` | Fold old turns via bili past this size |
-| `GPTBRIDGE_WEB_KEEP_RECENT` | `4` | Recent turns kept uncompressed |
+| `GPTBRIDGE_WEB_SESSIONS` | `~/.gptbridge/web-sessions.json` | Session → conversation id |
+| `GPTBRIDGE_WEB_COMPRESS_CHARS` | `60000` | bili fold threshold (4 recent turns stay raw) |
 
 Tunnel env (`~/.gptbridge/tunnel.env`):
 

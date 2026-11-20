@@ -73,3 +73,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-progress-test.mjs
   EXPECT: GPTBRIDGE_PROGRESS_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_PROGRESS_OK
+
+- [x] G15: task_status tool — .final persisted on done turn, task_status reports {steps_done, last_step, finished, reply}, session key sanitized
+  CHECK: node /tmp/gptbridge-taskstatus-test.mjs
+  EXPECT: GPTBRIDGE_TASKSTATUS_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_TASKSTATUS_OK
