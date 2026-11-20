@@ -39,9 +39,7 @@ function loadOrCreateToken() {
 }
 const TOKEN = loadOrCreateToken();
 
-// observability: every tool call is logged to stdout (journald) with its
-// duration, so `journalctl --user -u gptbridge -f` shows what ChatGPT is
-// doing on this machine and whether slowness is local or upstream.
+// Log every tool call to stdout (journald) with duration: `journalctl --user -u gptbridge -f`.
 const log = (...parts) => console.log(new Date().toISOString(), ...parts);
 let inflight = 0;
 const oneLine = (s) => String(s).replace(/\s+/g, " ").slice(0, 120);
@@ -135,43 +133,37 @@ async function callTool(name, args) {
   }
 }
 
+function reply(id, result, error) {
+  return { jsonrpc: "2.0", id, ...(error ? { error } : { result }) };
+}
+
+const fail = (code, message) => ({ code, message });
+
 async function handle(body) {
   const id = body?.id ?? null;
   switch (body?.method ?? "") {
     case "initialize":
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          protocolVersion:
-            typeof body?.params?.protocolVersion === "string" ? body.params.protocolVersion : "2025-03-26",
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "gptbridge", version: "1.1.0" },
-        },
-      };
+      return reply(id, {
+        protocolVersion:
+          typeof body?.params?.protocolVersion === "string" ? body.params.protocolVersion : "2025-03-26",
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "gptbridge", version: "1.1.0" },
+      });
     case "notifications/initialized":
       return null;
     case "ping":
-      return { jsonrpc: "2.0", id, result: {} };
+      return reply(id, {});
     case "tools/list":
-      return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+      return reply(id, { tools: TOOLS });
     case "tools/call": {
       const { text, isError } = await callTool(
         String(body?.params?.name ?? ""),
         body?.params?.arguments ?? {}
       );
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: { content: [{ type: "text", text }], isError },
-      };
+      return reply(id, { content: [{ type: "text", text }], isError });
     }
     default:
-      return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32601, message: `method not found: ${body?.method ?? ""}` },
-      };
+      return reply(id, undefined, fail(-32601, `method not found: ${body?.method ?? ""}`));
   }
 }
 
@@ -188,26 +180,32 @@ const server = http.createServer((req, res) => {
   req.on("data", (c) => chunks.push(c));
   req.on("end", async () => {
     const url = (req.url ?? "").split("?")[0];
+    const send = (status, payload) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(payload));
+    };
     if (!authorized(req, url)) {
       log(`401 unauthorized ${url}`);
-      res.writeHead(401, { "content-type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "unauthorized" } }));
+      send(401, reply(null, undefined, fail(-32001, "unauthorized")));
       return;
     }
     try {
       const raw = Buffer.concat(chunks).toString("utf8");
       body = raw ? JSON.parse(raw) : {};
     } catch {
-      res.writeHead(400, { "content-type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32700, message: "invalid JSON" } }));
+      send(400, reply(null, undefined, fail(-32700, "invalid JSON")));
       return;
     }
     try {
       const started = Date.now();
       const method = String(body?.method ?? "");
       inflight += 1;
-      const out = await handle(body);
-      inflight -= 1;
+      let out;
+      try {
+        out = await handle(body);
+      } finally {
+        inflight -= 1;
+      }
       const ms = Date.now() - started;
       if (method === "tools/call") {
         log(
@@ -221,12 +219,10 @@ const server = http.createServer((req, res) => {
         res.writeHead(202);
         res.end();
       } else {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(out));
+        send(200, out);
       }
     } catch (e) {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: body?.id ?? null, error: { code: -32603, message: String(e?.message ?? e) } }));
+      send(200, reply(body?.id ?? null, undefined, fail(-32603, String(e?.message ?? e))));
     }
   });
 });

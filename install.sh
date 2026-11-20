@@ -1,24 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# gptbridge installer: MCP server + systemd user services + tunnel wizard.
-#
-# Interactive mode asks [Y/n] (Enter = Y) before every step that writes to
-# your machine. Non-interactive (flags or no TTY) auto-accepts.
-#
-# Tunnel choices:
-#   openai      OpenAI Secure MCP Tunnel (default) - private, no public URL,
-#               no inbound ports. Needs 2 values only you can create:
-#               a tunnel_id (platform.openai.com) + a runtime API key.
-#   cloudflared cloudflared quick tunnel - public URL, changes per start.
-#   none        skip; wire a tunnel yourself.
-#
-# Non-interactive:
+# gptbridge installer: MCP server + systemd user service + OpenAI Secure MCP Tunnel.
+# Interactive [Y/n] (Enter = Y) before each write; non-interactive auto-accepts.
+# Tunnel: openai (default, private) | none (wire your own).
 #   bash install.sh --tunnel=openai --tunnel-id=tunnel_xxx --api-key=sk-xxx
-#   bash install.sh --tunnel=cloudflared
 #   bash install.sh --tunnel=none
-# Override the tunnel-client version (default: latest GitHub release):
-#   GPTBRIDGE_TC_VERSION=v0.0.16 bash install.sh ...
+# Override tunnel-client version: GPTBRIDGE_TC_VERSION=v0.0.16 bash install.sh
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 BIN_DIR="$HOME/.local/bin"
@@ -27,8 +15,7 @@ GB_DIR="$HOME/.gptbridge"
 APP_DIR="$HOME/.local/share/gptbridge"
 NODE_BIN="$(command -v node || { echo "ERROR: node not found"; exit 1; })"
 
-# where to fetch server.mjs / install.sh for remote (curl | bash) installs;
-# pin a version with GPTBRIDGE_REF=v1.2.3
+# Remote (curl | bash) source; pin with GPTBRIDGE_REF=v1.2.3.
 REPO_RAW="${GPTBRIDGE_REPO_RAW:-https://raw.githubusercontent.com/tinhien11/gptbridge/${GPTBRIDGE_REF:-master}}"
 
 if command -v curl >/dev/null 2>&1; then
@@ -39,10 +26,8 @@ else
   echo "ERROR: need curl or wget"; exit 1
 fi
 
-# curl | bash support: with the script on stdin, interactive prompts would
-# eat the remaining script text. Materialize the canonical script and re-exec
-# it with the terminal as stdin. CI (no tty anywhere) skips this and runs
-# non-interactive.
+# curl | bash: stdin prompts would eat the script. Re-exec from /dev/tty;
+# CI (no tty) runs non-interactive.
 if [ -z "${GPTBRIDGE_EXECED:-}" ] && [ ! -t 0 ] && { [ -t 1 ] || [ -t 2 ]; } && [ -c /dev/tty ]; then
   TMP_SELF="$(mktemp /tmp/gptbridge-install.XXXXXX.sh)"
   fetch "$TMP_SELF" "$REPO_RAW/install.sh"
@@ -59,17 +44,24 @@ for a in "$@"; do
   esac
 done
 case "$TUNNEL" in
-  ""|openai|cloudflared|none) ;;
-  *) echo "ERROR: --tunnel must be openai | cloudflared | none"; exit 1 ;;
+  ""|openai|none) ;;
+  *) echo "ERROR: --tunnel must be openai | none"; exit 1 ;;
 esac
-if [ -n "$TUNNEL_ID" ] && ! [[ "$TUNNEL_ID" =~ ^tunnel_[a-z0-9]{32}([a-z0-9]{4})?$ ]]; then
-  echo "ERROR: '$TUNNEL_ID' doesn't look like a tunnel id (expected tunnel_ + 32 lowercase chars)."
-  exit 1
+
+# Shared by flags and wizard.
+validate_tunnel_id() {
+  [[ "$1" =~ ^tunnel_[a-z0-9]{32}([a-z0-9]{4})?$ ]] || {
+    echo "ERROR: '$1' doesn't look like a tunnel id (expected tunnel_ + 32 lowercase chars)."
+    return 1
+  }
+}
+if [ -n "$TUNNEL_ID" ]; then
+  validate_tunnel_id "$TUNNEL_ID"
 fi
 
 INTERACTIVE=0; [ -t 0 ] && INTERACTIVE=1
 
-# ask "question" -> 0 = yes (Enter), 1 = no; auto-yes when non-interactive
+# 0 = yes (Enter), 1 = no; auto-yes when non-interactive.
 ask() {
   [ "$INTERACTIVE" = 1 ] || return 0
   local ans
@@ -79,8 +71,7 @@ ask() {
 }
 
 # --- step 1: server files ---
-# server.mjs: use it from this checkout when present (dev mode - the service
-# runs the repo file), otherwise download it (curl | bash)
+# Use checkout server.mjs if present (dev), else download it (curl | bash).
 if [ -n "$DIR" ] && [ -f "$DIR/server.mjs" ]; then
   SERVER_MJS="$DIR/server.mjs"
 else
@@ -187,18 +178,15 @@ if [ -z "$TUNNEL" ]; then
     echo
     echo "How should ChatGPT reach this machine?"
     echo "  1) OpenAI Secure MCP Tunnel  - private, no public URL (recommended)"
-    echo "  2) cloudflared quick tunnel  - public URL, changes every start"
-    echo "  3) Skip - I'll wire the tunnel myself"
+    echo "  2) Skip - I'll wire the tunnel myself"
     printf "Choose [1]: "
     read -r CHOICE
     case "${CHOICE:-1}" in
-      2) TUNNEL=cloudflared ;;
-      3) TUNNEL=none ;;
+      2) TUNNEL=none ;;
       *) TUNNEL=openai ;;
     esac
   else
-    # non-interactive, no flags: legacy behavior
-    if command -v cloudflared >/dev/null 2>&1; then TUNNEL=cloudflared; else TUNNEL=none; fi
+    TUNNEL=openai
   fi
 fi
 
@@ -237,29 +225,31 @@ setup_openai_tunnel() {
     rm -rf "$TC_TMP"
   fi
 
-  # --- step 4: the two values only the user can create ---
+  # --- step 4: tunnel id + API key ---
   if [ -z "$TUNNEL_ID" ]; then
-    echo
-    echo "Two values are needed; create them with your OpenAI account:"
-    echo
-    echo "  1) Tunnel ID"
-    echo "     URL : https://platform.openai.com/settings/organization/tunnels"
-    echo "     How : 'Create a tunnel' -> copy the id (starts with tunnel_)"
-    printf "     paste tunnel id  : "
-    read -r TUNNEL_ID
-    echo
-    echo "  2) Runtime API key"
-    echo "     URL : https://platform.openai.com/settings/organization/api-keys"
-    echo "     How : 'Create API key' (Runtime type) -> permission: Tunnels Read + Use"
-    echo "     Note: input is hidden; paste and press Enter"
-    printf "     paste runtime key: "
-    read -rs API_KEY
-    echo
+    if [ "$INTERACTIVE" = 1 ]; then
+      echo
+      echo "Two values are needed; create them with your OpenAI account:"
+      echo
+      echo "  1) Tunnel ID"
+      echo "     URL : https://platform.openai.com/settings/organization/tunnels"
+      echo "     How : 'Create a tunnel' -> copy the id (starts with tunnel_)"
+      printf "     paste tunnel id  : "
+      read -r TUNNEL_ID
+      echo
+      echo "  2) Runtime API key"
+      echo "     URL : https://platform.openai.com/settings/organization/api-keys"
+      echo "     How : 'Create API key' (Runtime type) -> permission: Tunnels Read + Use"
+      echo "     Note: input is hidden; paste and press Enter"
+      printf "     paste runtime key: "
+      read -rs API_KEY
+      echo
+    else
+      echo "ERROR: --tunnel=openai needs --tunnel-id=... and --api-key=... in non-interactive mode."
+      return 1
+    fi
   fi
-  if ! [[ "$TUNNEL_ID" =~ ^tunnel_[a-z0-9]{32}([a-z0-9]{4})?$ ]]; then
-    echo "ERROR: '$TUNNEL_ID' doesn't look like a tunnel id (expected tunnel_ + 32 chars)."
-    return 1
-  fi
+  validate_tunnel_id "$TUNNEL_ID"
   [ -n "$API_KEY" ] || { echo "ERROR: empty runtime API key"; return 1; }
 
   # --- step 5: env file + tunnel service ---
@@ -311,11 +301,7 @@ SVC
   echo "  Connection     : Tunnel  -> pick $TUNNEL_ID"
   echo "  Authentication : No authentication (the token is in the local path)"
   echo
-  echo "Using it: open a chat, enable the gptbridge connector (Developer mode), then ask:"
-  echo "  run hostname on my machine"
-  echo "  list the files in ~/projects"
-  echo "  read ~/.gitconfig and summarize it"
-  echo "  create /tmp/hello.txt containing 'hi'"
+  echo "Then ask in chat: run hostname on my machine"
 }
 
 case "$TUNNEL" in
@@ -325,48 +311,6 @@ case "$TUNNEL" in
     echo "Tunnel skipped. To expose it later, re-run: bash install.sh"
     echo "  or: bash install.sh --tunnel=openai --tunnel-id=tunnel_... --api-key=sk-..."
     echo
-    echo "Once a tunnel is up, add the connector at: https://chatgpt.com/plugins -> Add custom MCP"
-    ;;
-  cloudflared)
-    if command -v cloudflared >/dev/null 2>&1; then
-      if ask "Install gptbridge-tunnel.service (cloudflared, public URL) + enable now?"; then
-        CF_BIN="$(command -v cloudflared)"
-        cat > "$SVC_DIR/gptbridge-tunnel.service" <<SVC
-[Unit]
-Description=gptbridge public tunnel (cloudflared -> local MCP)
-After=gptbridge.service network-online.target
-
-[Service]
-ExecStart=$CF_BIN tunnel --url http://127.0.0.1:${GBPORT} --logfile %h/.gptbridge/cloudflared.log
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-SVC
-        systemctl --user daemon-reload
-        systemctl --user enable --now gptbridge-tunnel.service
-        sleep 6
-        URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$GB_DIR/cloudflared.log" | tail -1 || true)"
-        echo
-        echo "  tunnel service  : active"
-        echo "  public MCP URL  : ${URL:-starting... check: journalctl --user -u gptbridge-tunnel}"
-        echo
-        echo "Last step: https://chatgpt.com/plugins -> Add custom MCP"
-        echo "  MCP Server URL : ${URL}/mcp/\$(cat ~/.gptbridge/token)"
-        echo "  Authentication : No authentication"
-        echo
-        echo "Using it: open a chat, enable the gptbridge connector (Developer mode), then ask:"
-        echo "  run hostname on my machine"
-        echo "  list the files in ~/projects"
-        echo "  read ~/.gitconfig and summarize it"
-        echo "  create /tmp/hello.txt containing 'hi'"
-      else
-        echo "Tunnel skipped."
-      fi
-    else
-      echo
-      echo "  (cloudflared not found - install it or re-run with --tunnel=openai)"
-    fi
+    echo "Once the tunnel is up, add the connector at: https://chatgpt.com/plugins -> Add custom MCP"
     ;;
 esac
