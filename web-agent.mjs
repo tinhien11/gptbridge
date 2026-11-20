@@ -84,16 +84,18 @@ async function cdpEval(ws, expression) {
   return r.result?.value;
 }
 
-async function findTarget(host) {
+// One browser tab per session key: parallel delegates each get their own tab
+// and conversation instead of fighting over a shared chatgpt.com tab.
+async function findTarget(host, marker) {
   const r = await fetch(`${CDP_HTTP}/json/list`);
   const targets = await r.json();
-  return targets.find((t) => t.type === "page" && new URL(t.url).host === host);
+  return targets.find((t) => t.type === "page" && new URL(t.url).host === host && (!marker || t.url.includes(marker)));
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function ensureTab(host, url) {
-  let t = await findTarget(host);
+async function ensureTab(host, url, marker) {
+  let t = await findTarget(host, marker);
   if (!t) {
     const r = await fetch(`${CDP_HTTP}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
     t = await r.json();
@@ -101,6 +103,16 @@ async function ensureTab(host, url) {
   }
   const ws = await wsConnect(t.webSocketDebuggerUrl);
   return { target: t, ws };
+}
+
+// Per-session turn lock: concurrent calls with the SAME session key queue up;
+// different session keys run in parallel on separate tabs.
+const tabLocks = new Map();
+function withSessionLock(key, fn) {
+  const prev = tabLocks.get(key) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  tabLocks.set(key, next);
+  return next;
 }
 
 // --- in-page turn logic (adapted from tablm page-core, simplified) -----------
@@ -244,6 +256,10 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
   if (!prompt) throw new Error("prompt is required");
   const host = new URL(CHATGPT_URL).host;
   const key = session || "default";
+  return withSessionLock(key, () => delegateInner({ prompt, session: key, new_chat, timeout_s, host, key }));
+}
+
+async function delegateInner({ prompt, session: key, new_chat, timeout_s, host, key: _key }) {
   let convId = new_chat ? null : sessions[key] || null;
   const timeoutMs = Math.max(10_000, (timeout_s ?? 180) * 1000);
   const idleMs = Math.max(10_000, Math.round(timeoutMs * 0.8));
@@ -251,7 +267,9 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
   await maybeCompress(key);
   const actualPrompt = promptWithMemory(key, prompt);
 
-  const { target, ws } = await ensureTab(host, CHATGPT_URL);
+  // each session gets its own tab: reuse by unique marker, else open a new one
+  const marker = sessions[key] ? `c/${sessions[key]}` : null;
+  const { target, ws } = await ensureTab(host, CHATGPT_URL, marker);
   // reuse conversation if known, else open a fresh chat
   if (convId && !new URL(target.url).pathname.includes(convId)) {
     await cdpCall(ws, "Page.navigate", { url: `${CHATGPT_URL}c/${convId}` });

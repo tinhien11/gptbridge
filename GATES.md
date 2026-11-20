@@ -78,3 +78,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-taskstatus-test.mjs
   EXPECT: GPTBRIDGE_TASKSTATUS_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_TASKSTATUS_OK
+
+- [x] G16: parallel delegates — different session keys run concurrently on separate tabs (withSessionLock serializes only same-key turns)
+  CHECK: node /tmp/gptbridge-parallel-test.mjs
+  EXPECT: GPTBRIDGE_PARALLEL_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_PARALLEL_OK
