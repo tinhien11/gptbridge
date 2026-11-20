@@ -18,8 +18,10 @@ export const SELECTORS = {
   send: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]'],
   stop: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]'],
   generating: ['[data-is-streaming="true"]', ".result-streaming", '[aria-busy="true"]'],
-  assistant: ['[data-message-author-role="assistant"]', 'li[data-message-role="assistant"]'],
-  assistantContent: [".markdown", "[data-stream-target]"],
+  assistant: ['[data-message-author-role="assistant"]', 'li[data-message-role="assistant"]', '[class*="virtualized-turn"]'],
+  assistantContent: [".markdown", "[data-stream-target]", "[class*='virtualized-turn']"],
+  // new UI nests the turn text inside [class*=virtualized-turn]; each exchange is
+  // ONE node holding "You said:\n<prompt>\nChatGPT said:\n<reply>" — split it below
   conversationIdPattern: "^/(?:c|uc)/([0-9a-f-]{8,})",
   stabilityMs: 1200,
 };
@@ -126,11 +128,17 @@ const asyncPageTurnSource = `async function pageTurn(cfg) {
         const parts = all(s, el).filter((n, _i, arr) => !arr.some((o) => o !== n && o.contains(n)));
         if (parts.length) {
           const t = strip(parts.map((p) => p.innerText || "").join("\\n").trim());
-          return OUTAGE.test(t) ? "" : t;
+          return splitAssistant(t);
         }
       }
       const t = strip((el.innerText || el.textContent || "").trim());
-      return OUTAGE.test(t) ? "" : t;
+      return OUTAGE.test(t) ? "" : splitAssistant(t);
+    };
+    // new UI: one turn node holds "You said:\\n<prompt>\\nChatGPT said:\\n<reply>";
+    // keep only the assistant half so fresh-detection sees one reply per exchange
+    const splitAssistant = (t) => {
+      const idx = t.lastIndexOf("ChatGPT said:");
+      return idx >= 0 ? t.slice(idx + "ChatGPT said:".length).trim() : t;
     };
     const composer = () => firstVisible(S.composer);
     const sendBtn = () => firstVisible(S.send);
@@ -162,6 +170,7 @@ const asyncPageTurnSource = `async function pageTurn(cfg) {
     if (!comp) return { status: "error", text: "", conversationId: null, error: "composer not found on " + location.host };
     const READ_WINDOW = 8;
     const baseline = messageNodes().slice(-READ_WINDOW).map(readMessage);
+    const baselineNodes = messageNodes().length;
     // send: set composer, then click send; retry a few times, fall back to Enter
     let send = null;
     for (let attempt = 0; attempt < 6 && !send; attempt++) {
@@ -194,6 +203,9 @@ const asyncPageTurnSource = `async function pageTurn(cfg) {
     // poll until stable response
     let lastSeen = null, lastActivity = Date.now(), stableSince = null, candidate = "";
     while (Date.now() < deadline) {
+      // new UI has no streaming marker: a reply is only "fresh" once a new turn
+      // node appeared (or an existing one changed). Old UI: role-marked nodes
+      // are per-message, so node-count never changes — both handled below.
       const active = generating();
       const nodes = messageNodes().slice(-READ_WINDOW);
       const texts = nodes.map(readMessage);
@@ -201,6 +213,16 @@ const asyncPageTurnSource = `async function pageTurn(cfg) {
       for (let i = 0; i < texts.length; i++) {
         const t = texts[i];
         if (t && (baseline[i] === undefined || baseline[i] !== t)) fresh.push(t);
+      }
+      const nodeCount = messageNodes().length;
+      if (nodeCount <= baselineNodes) {
+        // no new exchange yet: any "fresh" text is stale content from an old
+        // turn whose node re-rendered; never return it as this turn's reply
+        await sleep(400);
+        if (Date.now() - lastActivity > cfg.idleMs) {
+          return { status: "timeout", text: "", conversationId: convId(), error: "no new turn appeared" };
+        }
+        continue;
       }
       candidate = fresh.length ? fresh[fresh.length - 1] : "";
       if (active || candidate !== lastSeen) { lastSeen = candidate; lastActivity = Date.now(); stableSince = null; }
@@ -341,10 +363,19 @@ async function maybeCompress(key) {
   }
 }
 
+// Ask ChatGPT to append progress to a local file via the write_file tool so
+// the human can `tail -f` it instead of scraping the DOM. Opt-out via env.
+const PROGRESS_LOG = (session) => path.join(os.homedir(), ".gptbridge", "tasks", `${session}.log`);
+
 function promptWithMemory(key, prompt) {
   const tr = transcripts[key];
-  if (!tr?.summary) return prompt;
-  return `[Context from earlier turns of this session]\n${tr.summary}\n[End context. Current request:]\n${prompt}`;
+  const parts = [];
+  if (tr?.summary) parts.push(`[Context from earlier turns of this session]\n${tr.summary}\n[End context.]`);
+  if (process.env.GPTBRIDGE_WEB_PROGRESS !== "0") {
+    parts.push(`[Housekeeping: as you complete each step of the request below, append one line to the file ${PROGRESS_LOG(key)} using your write_file tool (format: "HH:mm <step> done"). Do this before answering.]`);
+  }
+  parts.push(`[Request:]\n${prompt}`);
+  return parts.join("\n");
 }
 
 export function resetSessions() {

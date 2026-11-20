@@ -68,3 +68,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-brg-test.mjs
   EXPECT: GPTBRIDGE_BRG_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BRG_OK
+
+- [x] G14: fresh-detection + progress log — delegate returns only the NEW turn's reply (never stale text), and housekeeping line asks ChatGPT to append progress to ~/.gptbridge/tasks/<session>.log (GPTBRIDGE_WEB_PROGRESS=0 disables)
+  CHECK: node /tmp/gptbridge-progress-test.mjs
+  EXPECT: GPTBRIDGE_PROGRESS_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_PROGRESS_OK
