@@ -48,3 +48,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-bili-test.mjs
   EXPECT: GPTBRIDGE_BILI_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BILI_OK
+
+- [x] G10: tool schemas match bili contract (compress.content, decompress.blockId, acp_status.scope)
+  CHECK: node /tmp/gptbridge-bili-test.mjs
+  EXPECT: GPTBRIDGE_BILI_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BILI_OK

@@ -169,26 +169,42 @@ const BILI_TOOLS = [
   {
     name: "compress",
     description:
-      "Fold this conversation's history with billion-context (optional). Pass conversation_id when known; otherwise the proxy uses its active session. If bili is not installed this tool is absent.",
+      "Fold consumed conversation ranges into self-contained summaries (billion-context). content = ONE plain string: each block starts with an 'mNNNNN–mNNNNN optional topic' header line followed by its summary markdown. Write the summaries yourself from context you have; bili cannot see ChatGPT's transcript. Batch all blocks into ONE call. An empty call is refused. conversation_id is optional and only selects the bili session.",
     inputSchema: {
       type: "object",
-      properties: { conversation_id: { type: "string", description: "bili conversation id (optional)" } },
+      properties: {
+        content: { type: "string", description: "One string with all range blocks and their summaries" },
+        conversation_id: { type: "string", description: "bili conversation id (optional)" },
+      },
+      required: ["content"],
     },
   },
   {
     name: "decompress",
-    description: "Restore a compressed context block from billion-context.",
+    description: "Restore a previously compressed block from billion-context by id.",
     inputSchema: {
       type: "object",
-      properties: { conversation_id: { type: "string" }, ref: { type: "string" } },
+      properties: {
+        blockId: { type: "string", description: "Block id to restore (e.g. b5)" },
+        full: { type: "boolean", description: "Restore to original messages instead of one tier up" },
+        toFile: { type: "string", description: "Write to this file instead of returning into context" },
+      },
+      required: ["blockId"],
     },
   },
   {
     name: "acp_status",
-    description: "Read billion-context compression status for this conversation.",
+    description: "Show billion-context usage, compressible ranges and active blocks. No args = overview.",
     inputSchema: {
       type: "object",
-      properties: { conversation_id: { type: "string" } },
+      properties: {
+        scope: { type: "string", description: 'uncompressed | compressed | omit for overview' },
+        view: { type: "string", description: 'messages | ranges' },
+        tool: { type: "string", description: "With view:messages, filter by tool name" },
+        sort: { type: "string", description: "With view:messages: size | time | tool | age" },
+        limit: { type: "number", description: "Max entries to list" },
+        archiveDetail: { type: "boolean", description: "List archived blocks per id" },
+      },
     },
   },
 ];

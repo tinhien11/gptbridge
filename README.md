@@ -93,7 +93,8 @@ Optional and auto-detected. Nothing to configure if you do not install it — th
 
 - Set `GPTBRIDGE_BILI_ORIGIN=http://127.0.0.1:8787` if auto-detection misses.
 - Set `GPTBRIDGE_BILI_DISABLE=1` to hide the tools even when a proxy exists.
-- Pass `conversation_id` when known; otherwise bili uses its single active session. ChatGPT traffic does not flow through bili by default, so you usually need to create a bili session first (e.g. via DSH/Codex on the same machine).
+- `compress` does not read ChatGPT's transcript — bili only sees sessions that pass through it. ChatGPT writes the summaries itself and passes them in `content` (one string of `mNNNNN–mNNNNN topic` blocks). An empty `compress` call is refused.
+- Pass `conversation_id` when known; otherwise bili uses its single active session. ChatGPT traffic does not flow through bili by default, so the summaries come from the model's own context.
 
 ## Configuration
 
