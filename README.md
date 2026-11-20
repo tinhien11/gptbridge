@@ -32,6 +32,12 @@ bash install.sh --tunnel=openai --tunnel-id=tunnel_... --api-key=sk-...
 bash install.sh --tunnel=none
 ```
 
+Re-run without flags: saved `~/.gptbridge/tunnel.env` is reused, no re-paste. To update code/service only, with zero prompts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tinhien11/gptbridge/master/install.sh | bash -s -- --update
+```
+
 ## Connect
 
 [chatgpt.com/plugins](https://chatgpt.com/plugins) → **+ → Add custom MCP**:

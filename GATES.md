@@ -38,3 +38,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node -e "const s=require('fs').readFileSync('install.sh','utf8'); const seg=s.slice(s.indexOf('systemctl --user daemon-reload')); const ok=/systemctl --user restart gptbridge\.service/.test(seg)&&/enable gptbridge\.service/.test(seg); console.log(ok?'RESTART_OK':'RESTART_FAIL'); process.exit(ok?0:1)"
   EXPECT: RESTART_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=RESTART_OK
+
+- [x] G8: re-run reuses saved tunnel config and --update asks nothing
+  CHECK: node /tmp/gptbridge-rerun-test.mjs
+  EXPECT: GPTBRIDGE_RERUN_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_RERUN_OK

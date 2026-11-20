@@ -6,6 +6,7 @@ set -euo pipefail
 # Tunnel: openai (default, private) | none (wire your own).
 #   bash install.sh --tunnel=openai --tunnel-id=tunnel_xxx --api-key=sk-xxx
 #   bash install.sh --tunnel=none
+#   bash install.sh --update          (reinstall code/service only, keep config, no prompts)
 # Override tunnel-client version: GPTBRIDGE_TC_VERSION=v0.0.16 bash install.sh
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
@@ -34,9 +35,10 @@ if [ -z "${GPTBRIDGE_EXECED:-}" ] && [ ! -t 0 ] && { [ -t 1 ] || [ -t 2 ]; } && 
   GPTBRIDGE_EXECED=1 exec bash "$TMP_SELF" "$@" < /dev/tty
 fi
 
-TUNNEL="" TUNNEL_ID="" API_KEY=""
+TUNNEL="" TUNNEL_ID="" API_KEY="" UPDATE=0
 for a in "$@"; do
   case "$a" in
+    --update) UPDATE=1 ;;
     --tunnel=*) TUNNEL="${a#*=}" ;;
     --tunnel-id=*) TUNNEL_ID="${a#*=}" ;;
     --api-key=*) API_KEY="${a#*=}" ;;
@@ -59,7 +61,20 @@ if [ -n "$TUNNEL_ID" ]; then
   validate_tunnel_id "$TUNNEL_ID"
 fi
 
-INTERACTIVE=0; [ -t 0 ] && INTERACTIVE=1
+INTERACTIVE=0; [ -t 0 ] && [ "$UPDATE" != 1 ] && INTERACTIVE=1
+
+# Re-run: reuse saved tunnel config instead of prompting again.
+TUNNEL_ENV="$GB_DIR/tunnel.env"
+if [ -s "$TUNNEL_ENV" ]; then
+  saved_id="$(grep -oE '^CONTROL_PLANE_TUNNEL_ID=.*' "$TUNNEL_ENV" | head -1 | cut -d= -f2- || true)"
+  saved_key="$(grep -oE '^CONTROL_PLANE_API_KEY=.*' "$TUNNEL_ENV" | head -1 | cut -d= -f2- || true)"
+  [ -z "$TUNNEL_ID" ] && [ -n "$saved_id" ] && TUNNEL_ID="$saved_id"
+  [ -z "$API_KEY" ] && [ -n "$saved_key" ] && API_KEY="$saved_key"
+  if [ -n "$TUNNEL_ID" ] && [ -n "$API_KEY" ] && [ "$UPDATE" = 1 ]; then
+    TUNNEL=openai
+    echo "Reusing saved tunnel config from $TUNNEL_ENV"
+  fi
+fi
 
 # 0 = yes (Enter), 1 = no; auto-yes when non-interactive.
 ask() {
@@ -226,8 +241,11 @@ setup_openai_tunnel() {
     rm -rf "$TC_TMP"
   fi
 
-  # --- step 4: tunnel id + API key ---
-  if [ -z "$TUNNEL_ID" ]; then
+  # --- step 4: tunnel id + API key (saved config wins on re-run) ---
+  if [ -n "$TUNNEL_ID" ] && [ -n "$API_KEY" ]; then
+    validate_tunnel_id "$TUNNEL_ID" || return 1
+    echo "Reusing saved tunnel config from $TUNNEL_ENV"
+  elif [ -z "$TUNNEL_ID" ]; then
     if [ "$INTERACTIVE" = 1 ]; then
       echo
       echo "Two values are needed; create them with your OpenAI account:"
@@ -250,7 +268,6 @@ setup_openai_tunnel() {
       return 1
     fi
   fi
-  validate_tunnel_id "$TUNNEL_ID"
   [ -n "$API_KEY" ] || { echo "ERROR: empty runtime API key"; return 1; }
 
   # --- step 5: env file + tunnel service ---
