@@ -63,3 +63,8 @@ billion-context là tùy chọn: tự phát hiện proxy lúc runtime, không ha
   CHECK: node /tmp/gptbridge-web-test.mjs
   EXPECT: GPTBRIDGE_WEB_OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_WEB_OK
+
+- [x] G13: @brg mode — session transcript grows via delegate calls, bili compress fires over threshold, summary prefix reaches the chat page, transcript folded on disk
+  CHECK: node /tmp/gptbridge-brg-test.mjs
+  EXPECT: GPTBRIDGE_BRG_OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/data/projects/gptbridge; path=94da8482ccdd/7 entries; output=GPTBRIDGE_BRG_OK

@@ -108,6 +108,8 @@ Server env (`~/.gptbridge/env`):
 | `GPTBRIDGE_CDP_HTTP` | `http://127.0.0.1:9222` | Chrome debug endpoint for `chatgpt_delegate` |
 | `GPTBRIDGE_WEB_URL` | `https://chatgpt.com/` | Chat page the web agent drives |
 | `GPTBRIDGE_WEB_SESSIONS` | `~/.gptbridge/web-sessions.json` | Session key → conversation id |
+| `GPTBRIDGE_WEB_COMPRESS_CHARS` | `60000` | Fold old turns via bili past this size |
+| `GPTBRIDGE_WEB_KEEP_RECENT` | `4` | Recent turns kept uncompressed |
 
 Tunnel env (`~/.gptbridge/tunnel.env`):
 

@@ -225,6 +225,9 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
   let convId = new_chat ? null : sessions[key] || null;
   const timeoutMs = Math.max(10_000, (timeout_s ?? 180) * 1000);
   const idleMs = Math.max(10_000, Math.round(timeoutMs * 0.8));
+  transcripts[key] ??= { turns: [], summary: "", blockIds: [] };
+  await maybeCompress(key);
+  const actualPrompt = promptWithMemory(key, prompt);
 
   const { target, ws } = await ensureTab(host, CHATGPT_URL);
   // reuse conversation if known, else open a fresh chat
@@ -235,8 +238,12 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
     await cdpCall(ws, "Page.navigate", { url: CHATGPT_URL });
     await sleep(2000);
   }
-  const cfg = { prompt, timeoutMs, idleMs, selectors: SELECTORS };
+  const cfg = { prompt: actualPrompt, timeoutMs, idleMs, selectors: SELECTORS };
   const result = await cdpEval(ws, pageTurnJs(cfg));
+  if (result?.status === "done" && result.text) {
+    transcripts[key].turns.push({ prompt: actualPrompt, reply: result.text.slice(0, 6_000) });
+    saveTranscripts();
+  }
   if (result?.conversationId) rememberSession(key, result.conversationId);
   // chat refused the message -> fresh chat, retry once
   if (result?.status === "error" && /composer not found|did not accept/i.test(result.error ?? "") && !new_chat) {
@@ -244,10 +251,107 @@ export async function delegate({ prompt, session, new_chat, timeout_s }) {
     await cdpCall(ws, "Page.navigate", { url: CHATGPT_URL });
     await sleep(2000);
     const retry = await cdpEval(ws, pageTurnJs(cfg));
+    if (retry?.status === "done" && retry.text) {
+      transcripts[key].turns.push({ prompt: actualPrompt, reply: retry.text.slice(0, 6_000) });
+      saveTranscripts();
+    }
     if (retry?.conversationId) rememberSession(key, retry.conversationId);
     return retry;
   }
   return result;
 }
 
-export function resetSessions() { sessions = {}; try { fs.rmSync(SESSIONS_FILE, { force: true }); } catch {} }
+// --- transcript memory + optional bili compression (@brg mode) ---------------
+// gptbridge keeps each session's prompt/reply transcript locally. When it
+// grows past GPTBRIDGE_WEB_COMPRESS_CHARS, it folds older turns via the bili
+// proxy (compress/decompress tools, same discovery as server.mjs) and prepends
+// the summary to the next prompt. Purely additive: no bili -> no compression.
+const TRANSCRIPTS_FILE = path.join(os.homedir(), ".gptbridge", "web-transcripts.json");
+const COMPRESS_THRESHOLD = Number(process.env.GPTBRIDGE_WEB_COMPRESS_CHARS || 60_000);
+const KEEP_RECENT = Number(process.env.GPTBRIDGE_WEB_KEEP_RECENT || 4);
+
+let transcripts = (() => {
+  try { return JSON.parse(fs.readFileSync(TRANSCRIPTS_FILE, "utf8")); } catch { return {}; }
+})();
+
+function saveTranscripts() {
+  try {
+    fs.mkdirSync(path.dirname(TRANSCRIPTS_FILE), { recursive: true });
+    fs.writeFileSync(TRANSCRIPTS_FILE, JSON.stringify(transcripts, null, 2));
+  } catch { /* best effort */ }
+}
+
+function biliOrigin() {
+  if (process.env.GPTBRIDGE_BILI_DISABLE === "1") return null;
+  const candidates = [
+    process.env.GPTBRIDGE_BILI_ORIGIN,
+    process.env.BILI_MCP_PROXY,
+    process.env.BILLION_CONTEXT_PROXY,
+  ].filter(Boolean);
+  try {
+    const stateDir = path.join(
+      process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"),
+      "billion-context"
+    );
+    for (const dir of ["instances", "writers"]) {
+      for (const f of fs.readdirSync(path.join(stateDir, dir))) {
+        const j = JSON.parse(fs.readFileSync(path.join(stateDir, dir, f), "utf8"));
+        if (j.origin) candidates.push(j.origin);
+      }
+    }
+  } catch { /* no bili state dir */ }
+  return candidates[0] || null;
+}
+
+async function biliCall(tool, args) {
+  const origin = biliOrigin();
+  if (!origin) return null;
+  try {
+    const r = await fetch(`${origin}/__bili/plugin/tool`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tool, args }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const j = await r.json();
+    return j.ok ? j.result : null;
+  } catch { return null; }
+}
+
+// Turn each old turn into a compress block; bili validates >=50-char summaries.
+function transcriptBlocks(turns) {
+  return turns
+    .map((t, i) => `m0000${String(i).padStart(2, "0")}–m0000${String(i + 1).padStart(2, "0")} turn ${i + 1}\nUser asked: ${t.prompt.slice(0, 400)}\nChatGPT answered: ${t.reply.slice(0, 600)}`)
+    .join("\n\n");
+}
+
+async function maybeCompress(key) {
+  const tr = transcripts[key];
+  if (!tr || tr.turns.length <= KEEP_RECENT) return;
+  const oldChars = tr.turns.slice(0, -KEEP_RECENT).reduce((n, t) => n + t.prompt.length + t.reply.length, 0);
+  if (oldChars < COMPRESS_THRESHOLD) return;
+  const old = tr.turns.slice(0, -KEEP_RECENT);
+  const content = transcriptBlocks(old);
+  const res = await biliCall("compress", { content });
+  if (res && typeof res === "string" && res.length > 20) {
+    tr.summary = (tr.summary ? tr.summary + "\n\n" : "") + res.slice(0, 8_000);
+    tr.blockIds = (tr.blockIds || []).concat(res.match(/b\d+/g) || []);
+    tr.turns = tr.turns.slice(-KEEP_RECENT);
+    saveTranscripts();
+  }
+}
+
+function promptWithMemory(key, prompt) {
+  const tr = transcripts[key];
+  if (!tr?.summary) return prompt;
+  return `[Context from earlier turns of this session]\n${tr.summary}\n[End context. Current request:]\n${prompt}`;
+}
+
+export function resetSessions() {
+  sessions = {};
+  transcripts = {};
+  try { fs.rmSync(SESSIONS_FILE, { force: true }); } catch {}
+  try { fs.rmSync(TRANSCRIPTS_FILE, { force: true }); } catch {}
+}
+
+export { sessions as _sessions, transcripts as _transcripts };
