@@ -59,7 +59,7 @@ Enable the gptbridge connector in a chat, then ask (e.g. `run hostname`, `list ~
 | `read_file` | File content (~50k chars max) |
 | `write_file` | Create/overwrite a file |
 | `list_dir` | Directory listing |
-| `chatgpt_delegate` | Prompt ChatGPT web via Chrome CDP. ONE prompt per task (checklist + log/output files, `new_chat`); no multi-turn chains. Progress `~/.gptbridge/tasks/<session>.log`. See SKILL.md |
+| `chatgpt_delegate` | Prompt ChatGPT web via Chrome CDP. ONE prompt per task (checklist + log/output files, `new_chat`); no multi-turn chains. Progress `~/.gptbridge/tasks/<session>.log`. See WEB-AGENT-SKILL.md |
 | `task_status` | Delegated-task progress `{steps_done, last_step, finished, reply}`; poll it, never re-prompt the session |
 
 ## Watch
